@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "ingredients": [
+    {
+      "item": "splineroads:road_connector"
+    },
+    {
+      "item": "splineroads:endpoint_creator"
+    },
+    {
+      "item": "minecraft:compass"
+    }
+  ],
+  "result": {
+    "id": "splinequickbuild:quick_build_tool"
+  }
+}

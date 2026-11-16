@@ -1,0 +1,17 @@
+# Gradle / build output
+.gradle/
+build/
+out/
+run/
+*.iml
+.idea/
+.vscode/
+
+# Base mod jar used for compilation
+libs/*.jar
+!libs/README.md
+
+# Local test artifacts
+saves/
+*.jar
+!gradle/wrapper/gradle-wrapper.jar

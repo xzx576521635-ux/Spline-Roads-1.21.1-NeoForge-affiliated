@@ -1,0 +1,27 @@
+modLoader="javafml"
+loaderVersion="[4,)"
+license="MIT"
+[[mods]]
+modId="splinequickbuild"
+version="${mod_version}"
+displayName="Spline Roads: Quick Build"
+authors="Yi_Xuan"
+description='''Quick build tool add-on for Spline Roads: place an endpoint, see a live line with grade and displacement, then open the normal road settings screen.'''
+[[dependencies.splinequickbuild]]
+modId="neoforge"
+type="required"
+versionRange="[21.1,)"
+ordering="NONE"
+side="BOTH"
+[[dependencies.splinequickbuild]]
+modId="minecraft"
+type="required"
+versionRange="[1.21.1,1.21.2)"
+ordering="NONE"
+side="BOTH"
+[[dependencies.splinequickbuild]]
+modId="splineroads"
+type="required"
+versionRange="[2.0,)"
+ordering="NONE"
+side="BOTH"
