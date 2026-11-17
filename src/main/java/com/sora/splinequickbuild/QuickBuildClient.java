@@ -3,6 +3,7 @@ package com.sora.splinequickbuild;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.sora.splineroads.SplineRoads;
+import com.sora.splineroads.client.RoadScreen;
 import com.sora.splineroads.core.RoadGeometry;
 import com.sora.splineroads.world.NodeEntity;
 import com.sora.splineroads.world.RoadTool;
@@ -11,10 +12,13 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.RenderType;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.item.context.UseOnContext;
@@ -30,8 +34,11 @@ import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.client.event.RenderGuiEvent;
 import net.neoforged.neoforge.client.event.RenderLevelStageEvent;
 import net.neoforged.neoforge.client.event.RenderLevelStageEvent.Stage;
+import net.neoforged.neoforge.client.event.ScreenEvent;
+import net.neoforged.neoforge.network.PacketDistributor;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Client-side preview for the quick build tool: a straight guide line from the placed endpoint
@@ -46,6 +53,7 @@ public final class QuickBuildClient {
    private static ResourceLocation startDimension;
    private static BlockPos stableEnd;
    private static BlockPos pendingEnd;
+   private static BlockPos frozenEnd;
    private static long pendingSince;
    private static BlockPos curveStart;
    private static BlockPos curveEnd;
@@ -58,6 +66,33 @@ public final class QuickBuildClient {
    @SubscribeEvent
    public static void clientTick(ClientTickEvent.Post event) {
       QuickBuildKeys.tick();
+      updateGlint(Minecraft.getInstance());
+   }
+
+   /** Makes the held tool glint while a start point is selected (visual only, client stack). */
+   private static void updateGlint(Minecraft mc) {
+      if (mc.player == null) {
+         return;
+      }
+
+      ItemStack stack = null;
+      if (mc.player.getMainHandItem().getItem() instanceof QuickBuildTool) {
+         stack = mc.player.getMainHandItem();
+      } else if (mc.player.getOffhandItem().getItem() instanceof QuickBuildTool) {
+         stack = mc.player.getOffhandItem();
+      }
+
+      if (stack == null || stack.isEmpty()) {
+         return;
+      }
+
+      boolean glow = startPos != null;
+      boolean current = Boolean.TRUE.equals(stack.get(DataComponents.ENCHANTMENT_GLINT_OVERRIDE));
+      if (glow && !current) {
+         stack.set(DataComponents.ENCHANTMENT_GLINT_OVERRIDE, Boolean.TRUE);
+      } else if (!glow && current) {
+         stack.remove(DataComponents.ENCHANTMENT_GLINT_OVERRIDE);
+      }
    }
 
    /** Called from the item on the client for every block right click. */
@@ -90,11 +125,22 @@ public final class QuickBuildClient {
          stableEnd = null;
          pendingEnd = null;
       } else {
-         reset();
+         // Second click: the draft now has a fixed end. Freeze the preview there (the base mod keeps
+         // this draft alive until the road is built or the selection is cancelled).
+         BlockPos endpoint = RoadTool.endpointAtHit(level, context.getClickedPos(), context.getClickLocation());
+         frozenEnd = level.getBlockEntity(endpoint) instanceof NodeEntity
+            ? endpoint
+            : new BlockPlaceContext(context).getClickedPos();
+         invalidateCurve();
       }
    }
 
    public static void reset() {
+      if (frozenEnd != null) {
+         frozenEnd = null;
+         PacketDistributor.sendToServer(new DraftStatePayload(false));
+      }
+
       startPos = null;
       startDimension = null;
       stableEnd = null;
@@ -102,6 +148,31 @@ public final class QuickBuildClient {
       curveStart = null;
       curveEnd = null;
       curvePoints = null;
+   }
+
+   public static boolean hasFrozenEnd() {
+      return frozenEnd != null;
+   }
+
+   /** Server-driven selection sync (initial click, chained builds, cancel, rejoin). */
+   public static void setStart(long packed, String dimension) {
+      if (packed == 0L) {
+         reset();
+         return;
+      }
+
+      BlockPos pos = BlockPos.of(packed);
+      ResourceLocation dim = dimension == null || dimension.isEmpty() ? null : ResourceLocation.tryParse(dimension);
+      if (!pos.equals(startPos) || dim == null || !dim.equals(startDimension)) {
+         startPos = pos;
+         startDimension = dim;
+         if (frozenEnd != null) {
+            frozenEnd = null;
+            PacketDistributor.sendToServer(new DraftStatePayload(false));
+         }
+
+         invalidateCurve();
+      }
    }
 
    @SubscribeEvent
@@ -149,7 +220,13 @@ public final class QuickBuildClient {
       int lineHeight = 11;
       int y = mc.getWindow().getGuiScaledHeight() - 8 - lines * lineHeight;
 
-      graphics.drawString(mc.font, Component.literal("快速建造工具"), x, y, 0x55FFFF, true);
+      ItemStack held = mc.player.getMainHandItem().getItem() instanceof QuickBuildTool
+         ? mc.player.getMainHandItem()
+         : mc.player.getOffhandItem();
+      String durability = held.isDamageableItem()
+         ? "  耐久 " + (held.getMaxDamage() - held.getDamageValue()) + "/" + held.getMaxDamage()
+         : "";
+      graphics.drawString(mc.font, Component.literal("快速建造工具" + durability), x, y, 0x55FFFF, true);
       graphics.drawString(
          mc.font,
          Component.literal("模式  " + (QuickBuildKeys.straight() ? "强制直线" : "自动曲线") + "  (V 切换)"),
@@ -186,6 +263,95 @@ public final class QuickBuildClient {
       );
       graphics.drawString(mc.font, Component.literal("右键：设置终点并打开道路配置"), x, y + lineHeight * 6, 0x909090, true);
       graphics.drawString(mc.font, Component.literal("Shift+右键空气：取消选择"), x, y + lineHeight * 7, 0x909090, true);
+   }
+
+   /** Material bill for the road currently configured in the road screen. */
+   @SubscribeEvent
+   public static void screenClosing(ScreenEvent.Closing event) {
+      if (event.getScreen() instanceof RoadScreen && frozenEnd != null) {
+         // The draft is now pending on the server as well, so clicking bare ground reopens it
+         // instead of placing another endpoint.
+         PacketDistributor.sendToServer(new DraftStatePayload(true));
+      }
+   }
+
+   /** Material bill for the road currently configured in the road screen. */
+   @SubscribeEvent
+   public static void screenRender(ScreenEvent.Render.Post event) {
+      if (!(event.getScreen() instanceof RoadScreen road)) {
+         return;
+      }
+
+      Minecraft mc = Minecraft.getInstance();
+      if (mc.player == null) {
+         return;
+      }
+
+      RoadGeometry.Settings settings = road.currentSettingsOrNull();
+      if (settings == null) {
+         return;
+      }
+
+      CompoundTag draft = road.draftTag();
+      if (!draft.contains("A") || !draft.contains("B")) {
+         return;
+      }
+
+      BlockPos a = BlockPos.of(draft.getLong("A"));
+      BlockPos b = BlockPos.of(draft.getLong("B"));
+      Map<Item, Integer> bill = RoadMaterialCost.bill(a, b, settings);
+      if (bill.isEmpty()) {
+         return;
+      }
+
+      GuiGraphics graphics = event.getGuiGraphics();
+      int panelX = road.panelRight();
+      int panelY = road.panelTop();
+      int panelHeight = road.panelHeight();
+      int panelWidth = Math.max(96, Math.min(140, event.getScreen().width - panelX - 2));
+
+      // Same panel colour as the road screen, with the accent bar reused as the divider.
+      graphics.fill(panelX, panelY, panelX + panelWidth, panelY + panelHeight, -334356180);
+      graphics.fill(panelX, panelY, panelX + 2, panelY + panelHeight, -11477293);
+      graphics.drawString(mc.font, Component.literal("材料需求"), panelX + 10, panelY + 8, 0xFFFFC24A, true);
+      graphics.fill(panelX + 8, panelY + 20, panelX + panelWidth - 8, panelY + 21, 0x40FFFFFF);
+
+      int maxRows = Math.max(1, (panelHeight - 44) / 20);
+      int rows = Math.min(bill.size(), maxRows);
+
+      boolean creative = mc.player.isCreative();
+      int y = panelY + 26;
+      int drawn = 0;
+
+      for (Map.Entry<Item, Integer> entry : bill.entrySet()) {
+         if (drawn++ >= rows) {
+            break;
+         }
+
+         graphics.renderItem(new ItemStack(entry.getKey()), panelX + 8, y);
+         int have = creative ? entry.getValue() : countInInventory(mc.player, entry.getKey());
+         boolean enough = have >= entry.getValue();
+         String text = entry.getValue() + "  (" + have + ")";
+         graphics.drawString(mc.font, text, panelX + 30, y + 4, enough ? 0x55FF55 : 0xFF5555, true);
+         y += 20;
+      }
+
+      if (bill.size() > rows) {
+         graphics.drawString(mc.font, Component.literal("+" + (bill.size() - rows) + " 项…"), panelX + 10, y + 2, 0x909090, true);
+      }
+   }
+
+   private static int countInInventory(Player player, Item item) {
+      int total = 0;
+
+      for (int i = 0; i < player.getInventory().getContainerSize(); i++) {
+         ItemStack stack = player.getInventory().getItem(i);
+         if (stack.is(item)) {
+            total += stack.getCount();
+         }
+      }
+
+      return total;
    }
 
    /** Drops the cached centre line (the straight/curve mode or endpoints changed). */
@@ -265,19 +431,24 @@ public final class QuickBuildClient {
          return null;
       }
 
-      BlockHitResult hit = hit(mc);
-      if (hit == null) {
-         return null;
+      BlockPos endPos;
+      if (frozenEnd != null) {
+         // Pending draft (screen closed with Cancel): keep the end fixed.
+         endPos = frozenEnd;
+      } else {
+         BlockHitResult hit = hit(mc);
+         if (hit == null) {
+            return null;
+         }
+
+         endPos = RoadTool.endpointAtHit(mc.level, hit.getBlockPos(), hit.getLocation());
+         if (!(mc.level.getBlockEntity(endPos) instanceof NodeEntity)) {
+            endPos = new BlockPlaceContext(new UseOnContext(mc.player, hand, hit)).getClickedPos();
+         }
+
+         endPos = stabilize(endPos);
       }
 
-      // Snap to block centres so the line moves in whole-block steps instead of following the
-      // crosshair across a block's surface.
-      BlockPos endPos = RoadTool.endpointAtHit(mc.level, hit.getBlockPos(), hit.getLocation());
-      if (!(mc.level.getBlockEntity(endPos) instanceof NodeEntity)) {
-         endPos = new BlockPlaceContext(new UseOnContext(mc.player, hand, hit)).getClickedPos();
-      }
-
-      endPos = stabilize(endPos);
       return new Preview(nodePosition(mc, startPos), anchor(endPos), startPos, endPos);
    }
 

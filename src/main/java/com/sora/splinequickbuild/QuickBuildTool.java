@@ -12,6 +12,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.InteractionResultHolder;
+import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
@@ -36,12 +37,18 @@ import net.minecraft.world.phys.Vec3;
  */
 public final class QuickBuildTool extends RoadTool {
    public QuickBuildTool() {
-      super();
+      super(new Item.Properties().stacksTo(1).durability(384));
    }
 
    @Override
    public InteractionResult useOn(UseOnContext context) {
       if (context.getLevel().isClientSide) {
+         if (QuickBuildClient.hasFrozenEnd()) {
+            // A draft is already pending (screen closed with Cancel): clicking bare ground must
+            // reopen it instead of starting a new selection, exactly like the base mod.
+            return super.use(context.getLevel(), context.getPlayer(), context.getHand()).getResult();
+         }
+
          // The server keeps its selection in the stack NBT, which is not synced back to the
          // client; track the start point on the client so the preview has something to draw.
          QuickBuildClient.trackClick(context);
@@ -57,10 +64,25 @@ public final class QuickBuildTool extends RoadTool {
       // tool NBT so the base mod builds its draft in Mode.STRAIGHT.
       ItemNBT.edit(context.getItemInHand()).putBoolean("ForceStraight", QuickBuild.straight(player));
       BlockPos endpoint = RoadTool.endpointAtHit(level, context.getClickedPos(), context.getClickLocation());
+      boolean placed = false;
       if (!(level.getBlockEntity(endpoint) instanceof NodeEntity)) {
+         if (QuickBuild.pendingDraft(player)) {
+            // The client reopened the pending draft; do not place another endpoint on the server.
+            return InteractionResult.CONSUME;
+         }
+
          endpoint = placeEndpoint(player, context);
          if (endpoint == null) {
             return InteractionResult.CONSUME;
+         }
+
+         placed = true;
+      }
+
+      if (placed && !player.isCreative()) {
+         ItemStack tool = context.getItemInHand();
+         if (tool.isDamageableItem()) {
+            tool.hurtAndBreak(1, player, EquipmentSlot.MAINHAND);
          }
       }
 
@@ -73,9 +95,12 @@ public final class QuickBuildTool extends RoadTool {
       if (level.isClientSide) {
          if (player.isShiftKeyDown()) {
             QuickBuildClient.reset();
+            return InteractionResultHolder.success(player.getItemInHand(hand));
          }
 
-         return InteractionResultHolder.success(player.getItemInHand(hand));
+         // Keep the base mod's "resume" behaviour: after closing the road screen with Cancel,
+         // right clicking again reopens the pending draft instead of starting a new selection.
+         return super.use(level, player, hand);
       }
 
       return super.use(level, player, hand);

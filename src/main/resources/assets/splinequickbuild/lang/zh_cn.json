@@ -1,5 +1,6 @@
 {
   "item.splinequickbuild.quick_build_tool": "快速建造工具",
+  "item.splinequickbuild.quick_wrench": "道路端点扳手",
   "key.splinequickbuild.straight": "切换强制直线",
   "key.categories.splinequickbuild": "快速建造"
 }
