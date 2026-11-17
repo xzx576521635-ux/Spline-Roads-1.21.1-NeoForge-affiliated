@@ -1,4 +1,4 @@
-# Spline Roads: Quick Build
+﻿# Spline Roads: Quick Build
 
 [![Minecraft](https://img.shields.io/badge/Minecraft-1.21.1-62b47a)](https://www.minecraft.net/)
 [![NeoForge](https://img.shields.io/badge/NeoForge-21.1.x-da8b40)](https://neoforged.net/)
@@ -68,8 +68,6 @@ gradlew.bat build        # Windows
 
 ## 文档
 
-- [变更记录](docs/快速建造-变更记录.md)（版本、哈希、备份、回滚）
-- [设计与待办](docs/快速建造附属mod.md)
 
 ## 许可
 

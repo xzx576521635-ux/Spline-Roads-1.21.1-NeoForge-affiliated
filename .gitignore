@@ -1,4 +1,4 @@
-# Gradle / build output
+﻿# Gradle / build output
 .gradle/
 build/
 out/
@@ -15,3 +15,7 @@ libs/*.jar
 saves/
 *.jar
 !gradle/wrapper/gradle-wrapper.jar
+
+# Internal records / dev notes (local only, never commit)
+docs/快速建造-变更记录.md
+docs/快速建造附属mod.md
